@@ -20,7 +20,7 @@ def get_picks(start_time, end_time, conn):
             Pick.waveformID_networkCode AS Network, 
             Pick.waveformID_stationCode AS Station, 
             Pick.waveformID_channelCode AS Channel, 
-            Pick.time_value AS PickTime
+            Pick.time_value AS PickTime,
             Pick.time_value_ms as PickTime_ms
         FROM 
             Pick
@@ -41,28 +41,41 @@ def get_picks(start_time, end_time, conn):
 
 
 def update_to_SW_View(output_dir, start_time, end_time, fdsn_server, conn):
+
     try:
+
         picks = get_picks(start_time, end_time, conn)
+
     except Exception:
+
         print("Database connection issue")
         return 1
+    
     lockfile = open(os.path.join(output_dir, ".lock"), "w")
     lockfile.close()
     writefile = open(os.path.join(output_dir, "picks.txt"), "w")
+
     if picks:
+
         for pick in picks:
+
             network, station, channel, pick_time, pick_time_ms = pick
-            pick_time = pick_time + timedelta(milliseconds=pick_time_ms)
+            pick_time = pick_time + timedelta(microseconds=pick_time_ms)
             formatted_dt = pick_time.strftime("%Y-%m-%d %H:%M:%S.%f")
             print(f"{network}, {station}, {channel}, {formatted_dt}", file = writefile)
+
     else:
+
         print(f"No picks found from {start_time} to {end_time}", file = writefile)
+
     writefile.close()
     client = Client(fdsn_server)
+
     try:
         # Fetch station metadata
         inventory = client.get_stations(level="channel", starttime=start_time, endtime=end_time)
         print(f"Found {len(inventory)} networks with data.")
+
         for network in inventory:
             for station in network:
                 try:
@@ -106,38 +119,46 @@ def normal_mode(config):
     refresh_mins = float(config.get("refresh"))
     duration = float(config.get("duration"))
     output_dir = config.get("output_dir")
+    fdsn_server = config.get("fdsn_server")
     os.makedirs(output_dir, exist_ok=True)
     try:
         conn = mysql.connector.connect(**db_params)
+        end_time = UTCDateTime.now()
+        start_time = end_time - timedelta(minutes=duration)
         while True:
+
             end_time = UTCDateTime.now()
-            start_time = end_time - timedelta(minutes=duration)
-            fdsn_server = config.get("fdsn_server")
-            #TODO: Perhaps to add something like re-try parameter? But we don't need it from the first look, the refresh
-            # value meant to be small enough
-            result = update_to_SW_View(output_dir, start_time, end_time, fdsn_server, db_params)
+            result = update_to_SW_View(output_dir, start_time, end_time, fdsn_server, conn)
             if result == 0:
                 print(f"Data updated successfully. Next cycle is planned in {refresh_mins} minutes")
                 time.sleep(refresh_mins * 60)
+                start_time = end_time
             else:
                 print(f"Data update failed. Next cycle is planned in {refresh_mins} minutes")
-                time.sleep(refresh_mins * 60)
-    except KeyboardInterrupt:
-        print("Script interrupted by user")
-    except mysql.connector.Error as e:
-        print("Database connection error:", e)
+                if not conn.is_connected():
+                    try:
+                        conn.connect()
+                    except Exception:
+                        time.sleep(refresh_mins * 60)
+                        continue
+
+    except Exception:
+        print("Database connection issue")
+
     finally:
         if 'connection' in locals() and conn.is_connected():
             conn.close()
             print("Database connection closed")
 
 def offline_mode(config):
+
     db_params = config.get("db_params", {})
     fdsn_server = config.get("fdsn_server")
     output_dir = config["offline"]["output_dir"]
     from_time = UTCDateTime(config["offline"]["from_time"])
     to_time = UTCDateTime(config["offline"]["to_time"])
     os.makedirs(output_dir, exist_ok=True)
+
     try:
         conn = mysql.connector.connect(**db_params)
         result = update_to_SW_View(output_dir, from_time, to_time, fdsn_server, conn)
@@ -145,14 +166,18 @@ def offline_mode(config):
             print(f"Data updated successfully from {from_time} to {to_time} and stored in {output_dir}")
         else:
             print(f"Data update failed")
+
     except KeyboardInterrupt:
         print("Script interrupted by user")
+
     except mysql.connector.Error as e:
         print("Database connection error:", e)
+
     finally:
         if 'connection' in locals() and conn.is_connected():
             conn.close()
             print("Database connection closed")    
+
     return 0
 
 def main():
