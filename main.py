@@ -92,7 +92,7 @@ def update_to_SW_View(output_dir, start_time, end_time, fdsn_server, conn):
 
                     # Merge and save data by station
                     if st:
-                        st.merge(method=1)  # Merge overlapping traces
+                        st.merge(method=1, fill_value=0)  # Merge overlapping traces
                         filename = f"{network.code}.{station.code}.msd"
                         filepath = os.path.join(output_dir, filename)
                         st.write(filepath, format="MSEED")
@@ -123,11 +123,12 @@ def normal_mode(config):
     os.makedirs(output_dir, exist_ok=True)
     try:
         conn = mysql.connector.connect(**db_params)
-        end_time = UTCDateTime.now()
-        start_time = end_time - timedelta(minutes=duration)
+        #end_time = UTCDateTime.now()
+        #start_time = end_time - timedelta(minutes=duration)
         while True:
 
             end_time = UTCDateTime.now()
+            start_time = end_time - timedelta(minutes=duration)
             result = update_to_SW_View(output_dir, start_time, end_time, fdsn_server, conn)
             if result == 0:
                 print(f"Data updated successfully. Next cycle is planned in {refresh_mins} minutes")
