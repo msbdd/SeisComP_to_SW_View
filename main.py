@@ -8,10 +8,9 @@ from datetime import timedelta
 from obspy.clients.fdsn import Client
 from obspy import Stream, UTCDateTime
 
-def get_picks(start_time, end_time, db_params):
+def get_picks(start_time, end_time, conn):
 
     try:
-        conn = mysql.connector.connect(**db_params)
         cursor = conn.cursor()
         start_time = start_time.strftime("%Y-%m-%d %H:%M:%S")
         end_time = end_time.strftime("%Y-%m-%d %H:%M:%S")
@@ -22,6 +21,7 @@ def get_picks(start_time, end_time, db_params):
             Pick.waveformID_stationCode AS Station, 
             Pick.waveformID_channelCode AS Channel, 
             Pick.time_value AS PickTime
+            Pick.time_value_ms as PickTime_ms
         FROM 
             Pick
         WHERE Pick.time_value > %s
@@ -37,13 +37,12 @@ def get_picks(start_time, end_time, db_params):
         return []
 
     finally:
-        if conn.is_connected():
-            cursor.close()
-            conn.close()
+        cursor.close()
 
-def update_to_SW_View(output_dir, start_time, end_time, fdsn_server, db_params):
+
+def update_to_SW_View(output_dir, start_time, end_time, fdsn_server, conn):
     try:
-        picks = get_picks(start_time, end_time, db_params)
+        picks = get_picks(start_time, end_time, conn)
     except Exception:
         print("Database connection issue")
         return 1
@@ -52,8 +51,9 @@ def update_to_SW_View(output_dir, start_time, end_time, fdsn_server, db_params):
     writefile = open(os.path.join(output_dir, "picks.txt"), "w")
     if picks:
         for pick in picks:
-            network, station, channel, pick_time = pick
-            formatted_dt = pick_time.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+            network, station, channel, pick_time, pick_time_ms = pick
+            pick_time = pick_time + timedelta(milliseconds=pick_time_ms)
+            formatted_dt = pick_time.strftime("%Y-%m-%d %H:%M:%S.%f")
             print(f"{network}, {station}, {channel}, {formatted_dt}", file = writefile)
     else:
         print(f"No picks found from {start_time} to {end_time}", file = writefile)
@@ -107,19 +107,29 @@ def normal_mode(config):
     duration = float(config.get("duration"))
     output_dir = config.get("output_dir")
     os.makedirs(output_dir, exist_ok=True)
-    while True:
-        end_time = UTCDateTime.now()
-        start_time = end_time - timedelta(minutes=duration)
-        fdsn_server = config.get("fdsn_server")
-        #TODO: Perhaps to add something like re-try parameter? But we don't need it from the first look, the refresh
-        # value meant to be small enough
-        result = update_to_SW_View(output_dir, start_time, end_time, fdsn_server, db_params)
-        if result == 0:
-            print(f"Data updated successfully. Next cycle is planned in {refresh_mins} minutes")
-            time.sleep(refresh_mins * 60)
-        else:
-            print(f"Data update failed. Next cycle is planned in {refresh_mins} minutes")
-            time.sleep(refresh_mins * 60)
+    try:
+        conn = mysql.connector.connect(**db_params)
+        while True:
+            end_time = UTCDateTime.now()
+            start_time = end_time - timedelta(minutes=duration)
+            fdsn_server = config.get("fdsn_server")
+            #TODO: Perhaps to add something like re-try parameter? But we don't need it from the first look, the refresh
+            # value meant to be small enough
+            result = update_to_SW_View(output_dir, start_time, end_time, fdsn_server, db_params)
+            if result == 0:
+                print(f"Data updated successfully. Next cycle is planned in {refresh_mins} minutes")
+                time.sleep(refresh_mins * 60)
+            else:
+                print(f"Data update failed. Next cycle is planned in {refresh_mins} minutes")
+                time.sleep(refresh_mins * 60)
+    except KeyboardInterrupt:
+        print("Script interrupted by user")
+    except mysql.connector.Error as e:
+        print("Database connection error:", e)
+    finally:
+        if 'connection' in locals() and conn.is_connected():
+            conn.close()
+            print("Database connection closed")
 
 def offline_mode(config):
     db_params = config.get("db_params", {})
@@ -128,17 +138,27 @@ def offline_mode(config):
     from_time = UTCDateTime(config["offline"]["from_time"])
     to_time = UTCDateTime(config["offline"]["to_time"])
     os.makedirs(output_dir, exist_ok=True)
-    result = update_to_SW_View(output_dir, from_time, to_time, fdsn_server, db_params)
-    if result == 0:
-        print(f"Data updated successfully from {from_time} to {to_time} and stored in {output_dir}")
-    else:
-        print(f"Data update failed")
+    try:
+        conn = mysql.connector.connect(**db_params)
+        result = update_to_SW_View(output_dir, from_time, to_time, fdsn_server, conn)
+        if result == 0:
+            print(f"Data updated successfully from {from_time} to {to_time} and stored in {output_dir}")
+        else:
+            print(f"Data update failed")
+    except KeyboardInterrupt:
+        print("Script interrupted by user")
+    except mysql.connector.Error as e:
+        print("Database connection error:", e)
+    finally:
+        if 'connection' in locals() and conn.is_connected():
+            conn.close()
+            print("Database connection closed")    
     return 0
 
 def main():
-    parser = argparse.ArgumentParser(description="Data to SW_View")
-    parser.add_argument("--config", type=str, default="config.yaml", help="Path to YAML configuration file.")
-    parser.add_argument("--offline", action="store_true", help="Run in offline mode for a single download.")
+    parser = argparse.ArgumentParser(description="FDSNWS to SW_View")
+    parser.add_argument("--config", type=str, default="config.yaml", help="Path to YAML configuration file")
+    parser.add_argument("--offline", action="store_true", help="Run in offline mode for a single download")
     args = parser.parse_args()
     config = read_config(args.config)
     if args.offline:
