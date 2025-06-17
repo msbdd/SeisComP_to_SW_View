@@ -8,6 +8,7 @@ from datetime import timedelta
 from obspy.clients.fdsn import Client
 from obspy import Stream, UTCDateTime
 
+
 def get_picks(start_time, end_time, conn):
 
     try:
@@ -16,18 +17,19 @@ def get_picks(start_time, end_time, conn):
         end_time = end_time.strftime("%Y-%m-%d %H:%M:%S")
         arrival_query = """
 
-        SELECT 
-            Pick.waveformID_networkCode AS Network, 
-            Pick.waveformID_stationCode AS Station, 
-            Pick.waveformID_channelCode AS Channel, 
+        SELECT
+            Pick.waveformID_networkCode AS Network,
+            Pick.waveformID_stationCode AS Station,
+            Pick.waveformID_channelCode AS Channel,
             Pick.time_value AS PickTime,
             Pick.time_value_ms as PickTime_ms
-        FROM 
+        FROM
             Pick
         WHERE Pick.time_value > %s
         AND Pick.time_value < %s
-        
+
         """
+
         cursor.execute(arrival_query, (start_time, end_time))
         picks = cursor.fetchall()
         return picks
@@ -40,7 +42,8 @@ def get_picks(start_time, end_time, conn):
         cursor.close()
 
 
-def update_to_SW_View(output_dir, start_time, end_time, fdsn_server, conn, optional_id = None):
+def update_to_SW_View(output_dir, start_time, end_time,
+                      fdsn_server, conn, optional_id=None):
 
     try:
 
@@ -50,7 +53,7 @@ def update_to_SW_View(output_dir, start_time, end_time, fdsn_server, conn, optio
 
         print("Database connection issue")
         return 1
-    
+
     lockfile = open(os.path.join(output_dir, ".lock"), "w")
     lockfile.close()
     writefile = open(os.path.join(output_dir, "picks.txt"), "w")
@@ -62,18 +65,23 @@ def update_to_SW_View(output_dir, start_time, end_time, fdsn_server, conn, optio
             network, station, channel, pick_time, pick_time_ms = pick
             pick_time = pick_time + timedelta(microseconds=pick_time_ms)
             formatted_dt = pick_time.strftime("%Y-%m-%d %H:%M:%S.%f")
-            print(f"{network}, {station}, {channel}, {formatted_dt}", file = writefile)
+            print(
+                f"{network}, {station},"
+                f"{channel}, {formatted_dt}", file=writefile
+            )
 
     else:
 
-        print(f"No picks found from {start_time} to {end_time}", file = writefile)
+        print(f"No picks found from {start_time} to {end_time}",
+              file=writefile)
 
     writefile.close()
     client = Client(fdsn_server)
 
     try:
         # Fetch station metadata
-        inventory = client.get_stations(level="channel", starttime=start_time, endtime=end_time)
+        inventory = client.get_stations(level="channel",
+                                        starttime=start_time, endtime=end_time)
         print(f"Found {len(inventory)} networks with data.")
 
         for network in inventory:
@@ -84,15 +92,18 @@ def update_to_SW_View(output_dir, start_time, end_time, fdsn_server, conn, optio
                     for channel in station.channels:
                         try:
                             tr = client.get_waveforms(
-                                network.code, station.code, "*", channel.code, start_time, end_time
+                                network.code, station.code, "*",
+                                channel.code, start_time, end_time
                             )
                             st += tr
                         except Exception as e:
-                            print(f"Failed to fetch channel {channel.code}: {e}")
-
+                            print(
+                                f"Failed to fetch channel"
+                                f" {channel.code}: {e}")
                     # Merge and save data by station
                     if st:
-                        st.merge(method=1, fill_value=0)  # Merge overlapping traces
+                        # Merge overlapping traces
+                        st.merge(method=1, fill_value=0)
                         if not bool(optional_id):
                             filename = f"{network.code}.{station.code}.msd"
                         else:
@@ -116,10 +127,12 @@ def update_to_SW_View(output_dir, start_time, end_time, fdsn_server, conn, optio
     os.remove(os.path.join(output_dir, ".lock"))
     return 0
 
+
 def read_config(file_path):
     with open(file_path, 'r') as file:
         config = yaml.safe_load(file)
     return config
+
 
 def normal_mode(config):
     db_params = config.get("db_params", {})
@@ -135,24 +148,28 @@ def normal_mode(config):
             for line in lines:
                 line = line.replace("\n", "")
                 my_line = line.split("=")
-                optional_id_dict.update({my_line[0] : my_line[1]})
+                optional_id_dict.update({my_line[0]: my_line[1]})
 
     os.makedirs(output_dir, exist_ok=True)
     try:
         conn = mysql.connector.connect(**db_params)
-        #end_time = UTCDateTime.now()
-        #start_time = end_time - timedelta(minutes=duration)
+        # end_time = UTCDateTime.now()
+        # start_time = end_time - timedelta(minutes=duration)
         while True:
 
             end_time = UTCDateTime.now()
             start_time = end_time - timedelta(minutes=duration)
-            result = update_to_SW_View(output_dir, start_time, end_time, fdsn_server, conn, optional_id=optional_id_dict)
+            result = update_to_SW_View(
+                output_dir, start_time, end_time, fdsn_server,
+                conn, optional_id=optional_id_dict)
             if result == 0:
-                print(f"Data updated successfully. Next cycle is planned in {refresh_mins} minutes")
+                print(f"Data updated successfully. "
+                      f"Next cycle is planned in {refresh_mins} minutes")
                 time.sleep(refresh_mins * 60)
                 start_time = end_time
             else:
-                print(f"Data update failed. Next cycle is planned in {refresh_mins} minutes")
+                print(f"Data update failed. "
+                      f"Next cycle is planned in {refresh_mins} minutes")
                 if not conn.is_connected():
                     try:
                         conn.connect()
@@ -167,6 +184,7 @@ def normal_mode(config):
         if 'connection' in locals() and conn.is_connected():
             conn.close()
             print("Database connection closed")
+
 
 def offline_mode(config):
 
@@ -183,16 +201,19 @@ def offline_mode(config):
             for line in lines:
                 line = line.replace("\n", "")
                 my_line = line.split("=")
-                optional_id_dict.update({my_line[0] : my_line[1]})
+                optional_id_dict.update({my_line[0]: my_line[1]})
     os.makedirs(output_dir, exist_ok=True)
 
     try:
         conn = mysql.connector.connect(**db_params)
-        result = update_to_SW_View(output_dir, from_time, to_time, fdsn_server, conn, optional_id=optional_id_dict)
+        result = update_to_SW_View(
+            output_dir, from_time, to_time, fdsn_server,
+            conn, optional_id=optional_id_dict)
         if result == 0:
-            print(f"Data updated successfully from {from_time} to {to_time} and stored in {output_dir}")
+            print(f"Data updated successfully from {from_time} "
+                  f"to {to_time} and stored in {output_dir}")
         else:
-            print(f"Data update failed")
+            print("Data update failed")
 
     except KeyboardInterrupt:
         print("Script interrupted by user")
@@ -203,20 +224,23 @@ def offline_mode(config):
     finally:
         if 'connection' in locals() and conn.is_connected():
             conn.close()
-            print("Database connection closed")    
-
+            print("Database connection closed")
     return 0
+
 
 def main():
     parser = argparse.ArgumentParser(description="FDSNWS to SW_View")
-    parser.add_argument("--config", type=str, default="config.yaml", help="Path to YAML configuration file")
-    parser.add_argument("--offline", action="store_true", help="Run in offline mode for a single download")
+    parser.add_argument("--config", type=str, default="config.yaml",
+                        help="Path to YAML configuration file")
+    parser.add_argument("--offline", action="store_true",
+                        help="Run in offline mode for a single download")
     args = parser.parse_args()
     config = read_config(args.config)
     if args.offline:
         offline_mode(config)
     else:
         normal_mode(config)
+
 
 if __name__ == "__main__":
     main()
