@@ -100,6 +100,7 @@ def update_to_SW_View(output_dir, start_time, end_time,
                             print(
                                 f"Failed to fetch channel"
                                 f" {channel.code}: {e}")
+                            continue
                     # Merge and save data by station
                     if st:
                         # Merge overlapping traces
@@ -147,14 +148,17 @@ def normal_mode(config):
             lines = file.readlines()
             for line in lines:
                 line = line.replace("\n", "")
-                my_line = line.split("=")
+                my_line = line.strip().split("=", 1)
                 optional_id_dict.update({my_line[0]: my_line[1]})
 
     os.makedirs(output_dir, exist_ok=True)
+    # start_time = UTCDateTime.now()
     try:
         conn = mysql.connector.connect(**db_params)
         # end_time = UTCDateTime.now()
         # start_time = end_time - timedelta(minutes=duration)
+        # end_time = start_time + timedelta(minutes=duration)
+
         while True:
 
             end_time = UTCDateTime.now()
@@ -166,7 +170,7 @@ def normal_mode(config):
                 print(f"Data updated successfully. "
                       f"Next cycle is planned in {refresh_mins} minutes")
                 time.sleep(refresh_mins * 60)
-                start_time = end_time
+                # start_time = end_time
             else:
                 print(f"Data update failed. "
                       f"Next cycle is planned in {refresh_mins} minutes")
@@ -181,7 +185,7 @@ def normal_mode(config):
         print("Database connection issue")
 
     finally:
-        if 'connection' in locals() and conn.is_connected():
+        if 'conn' in locals() and conn.is_connected():
             conn.close()
             print("Database connection closed")
 
@@ -200,7 +204,7 @@ def offline_mode(config):
             lines = file.readlines()
             for line in lines:
                 line = line.replace("\n", "")
-                my_line = line.split("=")
+                my_line = line.strip().split("=", 1)
                 optional_id_dict.update({my_line[0]: my_line[1]})
     os.makedirs(output_dir, exist_ok=True)
 
