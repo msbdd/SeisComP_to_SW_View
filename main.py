@@ -40,7 +40,7 @@ def get_picks(start_time, end_time, conn):
         cursor.close()
 
 
-def update_to_SW_View(output_dir, start_time, end_time, fdsn_server, conn):
+def update_to_SW_View(output_dir, start_time, end_time, fdsn_server, conn, optional_id = None):
 
     try:
 
@@ -93,7 +93,14 @@ def update_to_SW_View(output_dir, start_time, end_time, fdsn_server, conn):
                     # Merge and save data by station
                     if st:
                         st.merge(method=1, fill_value=0)  # Merge overlapping traces
-                        filename = f"{network.code}.{station.code}.msd"
+                        if not bool(optional_id):
+                            filename = f"{network.code}.{station.code}.msd"
+                        else:
+                            if station.code in optional_id:
+                                optional_id_id = optional_id.get(station.code)
+                            else:
+                                optional_id_id = station.code
+                        filename = f"{network.code}.{optional_id_id}.msd"
                         filepath = os.path.join(output_dir, filename)
                         st.write(filepath, format="MSEED")
                         print(f"Saved {filepath}")
@@ -120,6 +127,16 @@ def normal_mode(config):
     duration = float(config.get("duration"))
     output_dir = config.get("output_dir")
     fdsn_server = config.get("fdsn_server")
+    optional_id = config.get("optional_id")
+    if optional_id:
+        optional_id_dict = dict()
+        with open(optional_id, 'r') as file:
+            lines = file.readlines()
+            for line in lines:
+                line = line.replace("\n", "")
+                my_line = line.split("=")
+                optional_id_dict.update({my_line[0] : my_line[1]})
+
     os.makedirs(output_dir, exist_ok=True)
     try:
         conn = mysql.connector.connect(**db_params)
@@ -129,7 +146,7 @@ def normal_mode(config):
 
             end_time = UTCDateTime.now()
             start_time = end_time - timedelta(minutes=duration)
-            result = update_to_SW_View(output_dir, start_time, end_time, fdsn_server, conn)
+            result = update_to_SW_View(output_dir, start_time, end_time, fdsn_server, conn, optional_id=optional_id_dict)
             if result == 0:
                 print(f"Data updated successfully. Next cycle is planned in {refresh_mins} minutes")
                 time.sleep(refresh_mins * 60)
@@ -158,11 +175,20 @@ def offline_mode(config):
     output_dir = config["offline"]["output_dir"]
     from_time = UTCDateTime(config["offline"]["from_time"])
     to_time = UTCDateTime(config["offline"]["to_time"])
+    optional_id = config.get("optional_id")
+    if optional_id:
+        optional_id_dict = dict()
+        with open(optional_id, 'r') as file:
+            lines = file.readlines()
+            for line in lines:
+                line = line.replace("\n", "")
+                my_line = line.split("=")
+                optional_id_dict.update({my_line[0] : my_line[1]})
     os.makedirs(output_dir, exist_ok=True)
 
     try:
         conn = mysql.connector.connect(**db_params)
-        result = update_to_SW_View(output_dir, from_time, to_time, fdsn_server, conn)
+        result = update_to_SW_View(output_dir, from_time, to_time, fdsn_server, conn, optional_id=optional_id_dict)
         if result == 0:
             print(f"Data updated successfully from {from_time} to {to_time} and stored in {output_dir}")
         else:
