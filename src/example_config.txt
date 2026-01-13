@@ -1,0 +1,53 @@
+# =============================================================================
+# SeisComP_To_SW_View Configuration
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# SeedLink Server Settings
+# -----------------------------------------------------------------------------
+seedlink_server = IP
+seedlink_port = 18000
+
+# Stream list file (stations and selectors)
+stream_file = streamlist.conf
+
+# State file for connection recovery (leave empty to disable)
+state_file = ringclient.state
+
+# Verbosity level (0=quiet, 1=normal, 2=debug, 3=debug with seedlink)
+verbose = 3
+
+# Ring buffer duration in minutes
+ring_buffer_minutes = 20
+
+# How often to clean old records (every N packets per channel)
+# Lower = more frequent cleanup, higher = less disk I/O
+cleanup_interval = 100
+
+# -----------------------------------------------------------------------------
+# Output Settings
+# -----------------------------------------------------------------------------
+# Directory for output files (mseed files, picks file)
+output_dir = data
+
+# -----------------------------------------------------------------------------
+# Database Pick Fetcher Settings
+# -----------------------------------------------------------------------------
+# Enable/disable pick fetcher (true/false, yes/no, 1/0)
+pickfetcher_enabled = true
+
+# Database connection
+db_host = IP
+db_port = PORT
+db_user = USER
+db_password = PASSWORD
+db_name = DATABASE_NAME
+
+# Output file for picks (relative to output_dir)
+picks_file = picks.txt
+
+# How often to fetch picks (seconds)
+picks_update_interval = 60
+
+# How far back to look for picks (seconds)
+picks_lookback = 7200
