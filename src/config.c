@@ -3,9 +3,16 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <sys/stat.h>
+#include <errno.h>
 
 #ifdef _WIN32
-    #define strcasecmp _stricmp
+    #include <direct.h>
+    #define mkdir(path, mode) _mkdir(path)
+    #define stat _stat
+    #define S_ISDIR(m) (((m) & _S_IFMT) == _S_IFDIR)
+#else
+    #include <sys/types.h>
 #endif
 
 /* Helper: trim whitespace from both ends of a string */
@@ -36,6 +43,110 @@ static int parse_bool(const char *value) {
     return 0;
 }
 
+/* Check if a path exists and is a directory */
+static int directory_exists(const char *path) {
+    struct stat st;
+    if (stat(path, &st) == 0) {
+        return S_ISDIR(st.st_mode);
+    }
+    return 0;
+}
+
+int config_create_directory(const char *path) {
+    char tmp[MAX_CONFIG_PATH];
+    char *p = NULL;
+    size_t len;
+    
+    if (path == NULL || path[0] == '\0') {
+        return 0;  /* Empty path is OK (current directory) */
+    }
+    
+    /* "." means current directory, always exists */
+    if (strcmp(path, ".") == 0) {
+        return 0;
+    }
+    
+    /* Check if it already exists */
+    if (directory_exists(path)) {
+        return 0;
+    }
+    
+    /* Copy path so we can modify it */
+    strncpy(tmp, path, sizeof(tmp) - 1);
+    tmp[sizeof(tmp) - 1] = '\0';
+    len = strlen(tmp);
+    
+    /* Remove trailing slash if present */
+    if (len > 0 && (tmp[len - 1] == '/' || tmp[len - 1] == '\\')) {
+        tmp[len - 1] = '\0';
+    }
+    
+    /* Create each directory in the path */
+    for (p = tmp + 1; *p; p++) {
+        if (*p == '/' || *p == '\\') {
+            *p = '\0';  /* Temporarily truncate */
+            
+            /* Skip if it's empty or a drive letter (e.g., "C:") */
+            size_t segment_len = strlen(tmp);
+            if (segment_len > 0 && tmp[segment_len - 1] != ':') {
+                if (!directory_exists(tmp)) {
+                    if (mkdir(tmp, 0755) != 0) {
+                        if (errno != EEXIST) {
+                            fprintf(stderr, "Error: Cannot create directory '%s': %s\n",
+                                    tmp, strerror(errno));
+                            return -1;
+                        }
+                    } else {
+                        printf("[Config] Created directory: %s\n", tmp);
+                    }
+                }
+            }
+            
+            *p = '/';  /* Restore as forward slash (works on both platforms) */
+        }
+    }
+    
+    /* Create the final directory */
+    if (!directory_exists(tmp)) {
+        if (mkdir(tmp, 0755) != 0) {
+            if (errno != EEXIST) {
+                fprintf(stderr, "Error: Cannot create directory '%s': %s\n",
+                        tmp, strerror(errno));
+                return -1;
+            }
+        } else {
+            printf("[Config] Created directory: %s\n", tmp);
+        }
+    }
+    
+    return 0;
+}
+
+int config_validate_path(const char *path) {
+    if (path == NULL) {
+        return -1;
+    }
+    
+    /* Empty path is OK (means current directory) */
+    if (path[0] == '\0' || strcmp(path, ".") == 0) {
+        return 0;
+    }
+    
+    /* Check length */
+    if (strlen(path) >= MAX_CONFIG_PATH) {
+        fprintf(stderr, "Error: Path too long: %s\n", path);
+        return -1;
+    }
+    
+    /* Check for null bytes (security) */
+    if (memchr(path, '\0', strlen(path)) != NULL) {
+        fprintf(stderr, "Error: Invalid path (contains null byte)\n");
+        return -1;
+    }
+    
+    return 0;
+}
+
 void config_init_defaults(AppConfig *config) {
     memset(config, 0, sizeof(AppConfig));
     
@@ -46,7 +157,7 @@ void config_init_defaults(AppConfig *config) {
     config->verbose = 0;
     config->ring_buffer_minutes = 5;
     config->state_file[0] = '\0';
-    config->cleanup_interval = 100;  /* Clean every 100 packets by default */
+    config->cleanup_interval = 100;
     
     /* Database defaults */
     config->pickfetcher_enabled = 0;
@@ -172,7 +283,7 @@ void config_print(const AppConfig *config) {
     printf("  verbose:           %d", config->verbose);
     if (config->verbose == 0) printf(" (quiet)\n");
     else if (config->verbose == 1) printf(" (normal)\n");
-    else if (config->verbose >= 2) printf(" (debug - per-packet info)\n");
+    else if (config->verbose >= 2) printf(" (debug)\n");
     else printf("\n");
     printf("  ring_buffer_min:   %d\n", config->ring_buffer_minutes);
     printf("  cleanup_interval:  %d packets\n", config->cleanup_interval);
@@ -216,6 +327,17 @@ int config_validate(const AppConfig *config) {
     if (config->cleanup_interval <= 0) {
         fprintf(stderr, "Error: cleanup_interval must be positive\n");
         errors++;
+    }
+    
+    /* Validate and create output directory */
+    if (config_validate_path(config->output_dir) < 0) {
+        errors++;
+    } else if (config->output_dir[0] != '\0') {
+        if (config_create_directory(config->output_dir) < 0) {
+            fprintf(stderr, "Error: Cannot create output directory: %s\n", 
+                    config->output_dir);
+            errors++;
+        }
     }
     
     if (config->pickfetcher_enabled) {
